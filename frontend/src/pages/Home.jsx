@@ -1,6 +1,7 @@
 import { FaSearch } from "react-icons/fa";
 import CategoryCard from "../components/CategoryCard";
 import NewsCard from "../components/NewsCard";
+import FeatureCard from "../components/FeatureCard";
 
 function Home() {
   return (
@@ -23,7 +24,6 @@ function Home() {
         </p>
 
         {/* Search Bar */}
-
         <div className="mt-12 w-full max-w-4xl flex">
 
           <input
@@ -41,7 +41,6 @@ function Home() {
       </section>
 
       {/* Categories */}
-
       <section className="mt-20 px-6">
 
         <h2 className="text-3xl font-bold text-center mb-8">
@@ -64,8 +63,7 @@ function Home() {
       </section>
 
       {/* Trending News */}
-
-      <section className="mt-24 px-6 pb-20">
+      <section className="mt-24 px-6">
 
         <h2 className="text-4xl font-bold text-center mb-12">
           🔥 Trending News
@@ -89,6 +87,43 @@ function Home() {
             title="NASA uses AI for Space Missions"
             source="NASA"
             description="NASA is integrating AI systems to improve mission planning and autonomous spacecraft operations."
+          />
+
+        </div>
+
+      </section>
+
+      {/* Features Section */}
+      <section className="mt-24 px-6 pb-20">
+
+        <h2 className="text-4xl font-bold text-center mb-12">
+          Why Choose NewsIQ?
+        </h2>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 max-w-7xl mx-auto">
+
+          <FeatureCard
+            icon="brain"
+            title="AI Summary"
+            description="Generate concise and meaningful news summaries using AI."
+          />
+
+          <FeatureCard
+            icon="globe"
+            title="Multi Language"
+            description="Read summaries in your preferred language."
+          />
+
+          <FeatureCard
+            icon="bolt"
+            title="Real-Time News"
+            description="Stay updated with the latest news from trusted sources."
+          />
+
+          <FeatureCard
+            icon="search"
+            title="Smart Search"
+            description="Quickly search and explore news across different categories."
           />
 
         </div>
