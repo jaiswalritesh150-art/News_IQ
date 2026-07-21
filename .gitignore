@@ -1,0 +1,3 @@
+frontend/src/.env
+backend/venv/
+backend/__pycache__/

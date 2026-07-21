@@ -1,14 +1,57 @@
+import { useState, useEffect } from "react";
 import { FaSearch } from "react-icons/fa";
+
 import CategoryCard from "../components/CategoryCard";
 import NewsCard from "../components/NewsCard";
 import FeatureCard from "../components/FeatureCard";
 
+import { fetchTopHeadlines, searchNews } from "../services/newsApi";
+
 function Home() {
+  const [search, setSearch] = useState("");
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadNews();
+  }, []);
+
+  async function loadNews() {
+    setLoading(true);
+
+    try {
+      const articles = await fetchTopHeadlines("technology");
+      setNews(articles || []);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSearch() {
+    if (!search.trim()) {
+      loadNews();
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const articles = await searchNews(search);
+      setNews(articles || []);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-black text-white">
 
-      {/* Hero Section */}
-      <section className="flex flex-col items-center justify-center text-center px-6 pt-24">
+      {/* Hero */}
+      <section className="flex flex-col items-center text-center px-6 pt-24">
 
         <h1 className="text-6xl md:text-7xl font-extrabold">
           Understand Every News
@@ -23,17 +66,28 @@ function Home() {
           concise and easy-to-understand insights.
         </p>
 
-        {/* Search Bar */}
+        {/* Search */}
+
         <div className="mt-12 w-full max-w-4xl flex">
 
           <input
             type="text"
             placeholder="Search any news..."
-            className="flex-1 px-6 py-5 bg-zinc-900 rounded-l-xl outline-none text-white text-lg"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                handleSearch();
+              }
+            }}
+            className="flex-1 px-6 py-5 bg-zinc-900 rounded-l-xl outline-none text-white"
           />
 
-          <button className="bg-blue-600 hover:bg-blue-700 px-8 rounded-r-xl transition">
-            <FaSearch size={22} />
+          <button
+            onClick={handleSearch}
+            className="bg-blue-600 hover:bg-blue-700 px-8 rounded-r-xl transition"
+          >
+            <FaSearch />
           </button>
 
         </div>
@@ -41,6 +95,7 @@ function Home() {
       </section>
 
       {/* Categories */}
+
       <section className="mt-20 px-6">
 
         <h2 className="text-3xl font-bold text-center mb-8">
@@ -55,45 +110,50 @@ function Home() {
           <CategoryCard title="Finance" />
           <CategoryCard title="Sports" />
           <CategoryCard title="Politics" />
-          <CategoryCard title="Health" />
           <CategoryCard title="Science" />
+          <CategoryCard title="Health" />
 
         </div>
 
       </section>
 
-      {/* Trending News */}
+      {/* News */}
+
       <section className="mt-24 px-6">
 
         <h2 className="text-4xl font-bold text-center mb-12">
-          🔥 Trending News
+          🔥 Latest Headlines
         </h2>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
+        {loading ? (
 
-          <NewsCard
-            title="AI is Transforming Healthcare"
-            source="BBC News"
-            description="Artificial Intelligence is helping doctors diagnose diseases faster and more accurately."
-          />
+          <h2 className="text-center text-xl">
+            Loading News...
+          </h2>
 
-          <NewsCard
-            title="OpenAI launches new AI Model"
-            source="TechCrunch"
-            description="The latest OpenAI model improves reasoning, coding and multilingual performance."
-          />
+        ) : (
 
-          <NewsCard
-            title="NASA uses AI for Space Missions"
-            source="NASA"
-            description="NASA is integrating AI systems to improve mission planning and autonomous spacecraft operations."
-          />
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
 
-        </div>
+            {news.map((article, index) => (
+              <NewsCard
+                key={index}
+                title={article.title}
+                source={article.source?.name}
+                description={article.description}
+                image={article.urlToImage}
+                url={article.url}
+              />
+            ))}
+
+          </div>
+
+        )}
 
       </section>
 
-      {/* Features Section */}
+      {/* Features */}
+
       <section className="mt-24 px-6 pb-20">
 
         <h2 className="text-4xl font-bold text-center mb-12">
@@ -105,25 +165,25 @@ function Home() {
           <FeatureCard
             icon="brain"
             title="AI Summary"
-            description="Generate concise and meaningful news summaries using AI."
+            description="Generate concise summaries using AI."
           />
 
           <FeatureCard
             icon="globe"
             title="Multi Language"
-            description="Read summaries in your preferred language."
+            description="Read news in your preferred language."
           />
 
           <FeatureCard
             icon="bolt"
             title="Real-Time News"
-            description="Stay updated with the latest news from trusted sources."
+            description="Always updated with latest headlines."
           />
 
           <FeatureCard
             icon="search"
             title="Smart Search"
-            description="Quickly search and explore news across different categories."
+            description="Search news instantly using keywords."
           />
 
         </div>
