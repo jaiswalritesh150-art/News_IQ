@@ -1,11 +1,13 @@
+import Navbar from "./components/Navbar";
+import Home from "./pages/Home";
+
 function App() {
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <h1 className="text-5xl font-bold">
-        Welcome to NewIQ 🚀
-      </h1>
+    <div className="bg-black min-h-screen text-white">
+      <Navbar />
+      <Home />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
