@@ -9,25 +9,31 @@ import { fetchTopHeadlines, searchNews } from "../services/newsApi";
 
 function Home() {
   const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("technology");
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadNews();
-  }, []);
+  }, [selectedCategory]);
 
   async function loadNews() {
-    setLoading(true);
+  console.log("Selected Category:", selectedCategory);
 
-    try {
-      const articles = await fetchTopHeadlines("technology");
-      setNews(articles || []);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+  setLoading(true);
+
+  try {
+    const articles = await fetchTopHeadlines(selectedCategory);
+
+    console.log("Articles:", articles);
+
+    setNews(articles || []);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    setLoading(false);
   }
+}
 
   async function handleSearch() {
     if (!search.trim()) {
@@ -42,6 +48,7 @@ function Home() {
       setNews(articles || []);
     } catch (error) {
       console.error(error);
+      alert("Failed to fetch news");
     } finally {
       setLoading(false);
     }
@@ -67,7 +74,6 @@ function Home() {
         </p>
 
         {/* Search */}
-
         <div className="mt-12 w-full max-w-4xl flex">
 
           <input
@@ -95,7 +101,6 @@ function Home() {
       </section>
 
       {/* Categories */}
-
       <section className="mt-20 px-6">
 
         <h2 className="text-3xl font-bold text-center mb-8">
@@ -104,21 +109,75 @@ function Home() {
 
         <div className="flex flex-wrap justify-center gap-5">
 
-          <CategoryCard title="Technology" />
-          <CategoryCard title="Artificial Intelligence" />
-          <CategoryCard title="Business" />
-          <CategoryCard title="Finance" />
-          <CategoryCard title="Sports" />
-          <CategoryCard title="Politics" />
-          <CategoryCard title="Science" />
-          <CategoryCard title="Health" />
+          <CategoryCard
+            title="Technology"
+            onClick={() => {
+              console.log("Technology Clicked");
+              setSelectedCategory("technology");
+            }}
+          />
+
+          <CategoryCard
+            title="Artificial Intelligence"
+            onClick={() => {
+              console.log("AI Clicked");
+              setSelectedCategory("technology");
+            }}
+          />
+
+          <CategoryCard
+            title="Business"
+            onClick={() => {
+              console.log("Business Clicked");
+              setSelectedCategory("business");
+            }}
+          />
+
+          <CategoryCard
+            title="Finance"
+            onClick={() => {
+              console.log("Finance Clicked");
+              setSelectedCategory("business");
+            }}
+          />
+
+          <CategoryCard
+            title="Sports"
+            onClick={() => {
+              console.log("Sports Clicked");
+              setSelectedCategory("sports");
+            }}
+          />
+
+          <CategoryCard
+            title="Politics"
+            onClick={() => {
+              console.log("Politics Clicked");
+              setSelectedCategory("general");
+            }}
+          />
+
+          <CategoryCard
+            title="Science"
+            onClick={() => {
+              console.log("Science Clicked");
+              setSelectedCategory("science");
+            }}
+          />
+
+          <CategoryCard
+            title="Health"
+            onClick={() => {
+              console.log("Health Clicked");
+              setSelectedCategory("health");
+            }}
+          />
 
         </div>
 
       </section>
 
       {/* News */}
-
       <section className="mt-24 px-6">
 
         <h2 className="text-4xl font-bold text-center mb-12">
@@ -126,13 +185,10 @@ function Home() {
         </h2>
 
         {loading ? (
-
           <h2 className="text-center text-xl">
             Loading News...
           </h2>
-
         ) : (
-
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
 
             {news.map((article, index) => (
@@ -147,13 +203,11 @@ function Home() {
             ))}
 
           </div>
-
         )}
 
       </section>
 
       {/* Features */}
-
       <section className="mt-24 px-6 pb-20">
 
         <h2 className="text-4xl font-bold text-center mb-12">

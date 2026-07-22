@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
@@ -6,39 +7,63 @@ import os
 
 load_dotenv()
 
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not API_KEY:
+    raise Exception("GEMINI_API_KEY not found in .env")
+
+client = genai.Client(api_key=API_KEY)
+
 app = FastAPI()
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+
 class NewsRequest(BaseModel):
-    text: str
+    title: str
+    description: str
 
 
 @app.get("/")
 def home():
-    return {
-        "message": "NewsIQ Backend Running 🚀"
-    }
+    return {"message": "NewsIQ Backend Running 🚀"}
 
 
 @app.post("/summarize")
 def summarize(news: NewsRequest):
 
     prompt = f"""
-    Summarize the following news article in simple English.
-    Keep it under 120 words.
+You are an AI News Assistant.
 
-    News:
-    {news.text}
-    """
+Summarize the following news in very simple English.
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
+Title:
+{news.title}
 
-    return {
-        "summary": response.text
-    }
+Description:
+{news.description}
+
+Return only 5 short bullet points.
+Maximum 100 words.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+        )
+
+        return {
+            "summary": response.text
+        }
+
+    except Exception as e:
+        return {
+            "summary": f"Error: {str(e)}"
+        }

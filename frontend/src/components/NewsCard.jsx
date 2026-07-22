@@ -1,8 +1,28 @@
+import { useState } from "react";
+import { summarizeNews } from "../services/newsApi";
+
 function NewsCard({ title, source, description, image, url }) {
+  const [summary, setSummary] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSummary() {
+    setLoading(true);
+
+    try {
+      const result = await summarizeNews(title, description);
+      setSummary(result);
+    } catch (error) {
+      alert("Failed to generate summary");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-blue-500 transition duration-300 hover:scale-105">
 
-      {/* News Image */}
+      {/* Image */}
       <img
         src={
           image ||
@@ -28,8 +48,12 @@ function NewsCard({ title, source, description, image, url }) {
 
         <div className="flex gap-3 mt-6">
 
-          <button className="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg">
-            Summarize
+          <button
+            onClick={handleSummary}
+            disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg disabled:bg-gray-600"
+          >
+            {loading ? "Summarizing..." : "Summarize"}
           </button>
 
           <a
@@ -42,6 +66,18 @@ function NewsCard({ title, source, description, image, url }) {
           </a>
 
         </div>
+
+        {summary && (
+          <div className="mt-6 bg-zinc-800 rounded-lg p-4 border border-blue-500">
+            <h4 className="text-blue-400 font-semibold mb-2">
+              ✨ AI Summary
+            </h4>
+
+            <p className="text-gray-300 whitespace-pre-wrap">
+              {summary}
+            </p>
+          </div>
+        )}
 
       </div>
 

@@ -1,3 +1,20 @@
-frontend/src/.env
+# Frontend Environment
+frontend/.env
+
+# Backend Environment
+backend/.env
+
+# Python Virtual Environment
+.venv/
 backend/venv/
+
+# Python Cache
+__pycache__/
 backend/__pycache__/
+*.pyc
+
+# Node Modules
+frontend/node_modules/
+
+# Vite Build
+frontend/dist/

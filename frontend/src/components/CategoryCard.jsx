@@ -1,8 +1,13 @@
-function CategoryCard({ title }) {
+function CategoryCard({ title, onClick }) {
   return (
-    <button className="bg-zinc-900 border border-zinc-700 px-6 py-3 rounded-xl hover:bg-blue-600 transition duration-300">
-      {title}
-    </button>
+    <div
+      onClick={onClick}
+      className="bg-zinc-900 rounded-xl p-5 cursor-pointer hover:bg-zinc-800 hover:border-blue-500 border border-zinc-800 transition duration-300"
+    >
+      <h3 className="text-white font-semibold">
+        {title}
+      </h3>
+    </div>
   );
 }
 
