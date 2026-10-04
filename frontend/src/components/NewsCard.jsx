@@ -1,87 +1,88 @@
-import { useState } from "react";
-import { summarizeNews } from "../services/newsApi";
-
-function NewsCard({ title, source, description, image, url }) {
-  const [summary, setSummary] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleSummary() {
-    setLoading(true);
-
-    try {
-      const result = await summarizeNews(title, description);
-      setSummary(result);
-    } catch (error) {
-      alert("Failed to generate summary");
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
+function NewsCard({
+  title,
+  source,
+  description,
+  image,
+  url,
+  summary,
+}) {
   return (
-    <div className="bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 hover:border-blue-500 transition duration-300 hover:scale-105">
+    <article className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 hover:border-zinc-700 transition duration-300">
 
       {/* Image */}
-      <img
-        src={
-          image ||
-          "https://via.placeholder.com/400x220?text=NewsIQ"
-        }
-        alt={title}
-        className="w-full h-52 object-cover"
-      />
+      <div className="relative overflow-hidden">
+        <img
+          src={
+            image ||
+            "https://via.placeholder.com/400x220?text=NewsIQ"
+          }
+          alt={title}
+          className="w-full h-52 object-cover"
+        />
+      </div>
 
+
+      {/* Content */}
       <div className="p-6">
 
-        <h3 className="text-xl font-bold text-white mb-3 line-clamp-2">
+        {/* Source */}
+        <p className="text-blue-400 text-xs font-semibold uppercase tracking-wider mb-3">
+          {source || "News Source"}
+        </p>
+
+
+        {/* Title */}
+        <h3 className="text-xl font-bold text-white leading-snug mb-3 line-clamp-2">
           {title}
         </h3>
 
-        <p className="text-blue-400 text-sm mb-3">
-          {source}
+
+        {/* Description */}
+        <p className="text-gray-400 text-sm leading-relaxed line-clamp-3">
+          {description || "No description available for this article."}
         </p>
 
-        <p className="text-gray-400 line-clamp-3">
-          {description || "No description available."}
-        </p>
 
-        <div className="flex gap-3 mt-6">
+        {/* AI Summary */}
+        <div className="mt-6 bg-zinc-950 rounded-xl p-5 border border-blue-900/60">
 
-          <button
-            onClick={handleSummary}
-            disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg disabled:bg-gray-600"
-          >
-            {loading ? "Summarizing..." : "Summarize"}
-          </button>
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-lg">✨</span>
 
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="bg-zinc-700 hover:bg-zinc-600 px-5 py-2 rounded-lg"
-          >
-            Read More
-          </a>
+            <h4 className="text-blue-400 font-semibold">
+              AI Summary
+            </h4>
+          </div>
+
+
+          {summary ? (
+            <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
+              {summary}
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">
+              Summary unavailable.
+            </p>
+          )}
 
         </div>
 
-        {summary && (
-          <div className="mt-6 bg-zinc-800 rounded-lg p-4 border border-blue-500">
-            <h4 className="text-blue-400 font-semibold mb-2">
-              ✨ AI Summary
-            </h4>
 
-            <p className="text-gray-300 whitespace-pre-wrap">
-              {summary}
-            </p>
-          </div>
+        {/* Read Full Article */}
+        {url && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-5 w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 px-5 py-3 rounded-lg text-sm font-semibold transition"
+          >
+            Read Full Article
+            <span>↗</span>
+          </a>
         )}
 
       </div>
-
-    </div>
+    </article>
   );
 }
 

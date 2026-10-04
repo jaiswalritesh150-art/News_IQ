@@ -1,11 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FaSearch } from "react-icons/fa";
 
 import CategoryCard from "../components/CategoryCard";
 import NewsCard from "../components/NewsCard";
 import FeatureCard from "../components/FeatureCard";
 
-import { fetchTopHeadlines, searchNews } from "../services/newsApi";
+import {
+  fetchTopHeadlines,
+  searchNews,
+  summarizeNewsBatch,
+} from "../services/newsApi";
+
 
 function Home() {
   const [search, setSearch] = useState("");
@@ -13,51 +18,175 @@ function Home() {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Used to ignore old/stale API responses
+  const requestIdRef = useRef(0);
+
+
+  // ==================================================
+  // LOAD CATEGORY NEWS
+  // ==================================================
+
   useEffect(() => {
     loadNews();
   }, [selectedCategory]);
 
+
   async function loadNews() {
-  console.log("Selected Category:", selectedCategory);
+    const requestId = ++requestIdRef.current;
 
-  setLoading(true);
-
-  try {
-    const articles = await fetchTopHeadlines(selectedCategory);
-
-    console.log("Articles:", articles);
-
-    setNews(articles || []);
-  } catch (error) {
-    console.error(error);
-  } finally {
-    setLoading(false);
-  }
-}
-
-  async function handleSearch() {
-    if (!search.trim()) {
-      loadNews();
-      return;
-    }
+    console.log("Selected Category:", selectedCategory);
 
     setLoading(true);
 
     try {
-      const articles = await searchNews(search);
-      setNews(articles || []);
+      const articles = await fetchTopHeadlines(selectedCategory);
+
+      // Ignore response from an older request
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.log("Articles:", articles);
+
+      const selectedArticles = (articles || []).slice(0, 5);
+
+      // Show news immediately
+      setNews(selectedArticles);
+
+      // Generate all summaries in ONE batch request
+      if (selectedArticles.length > 0) {
+        console.log("Generating batch AI summaries...");
+
+        const summaries = await summarizeNewsBatch(
+          selectedArticles
+        );
+
+        // Ignore old summary response
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        console.log("AI Summaries:", summaries);
+
+        const articlesWithSummaries =
+          selectedArticles.map((article, index) => ({
+            ...article,
+            summary: summaries[index] || "",
+          }));
+
+        setNews(articlesWithSummaries);
+      }
+
     } catch (error) {
-      console.error(error);
-      alert("Failed to fetch news");
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.error("Failed to load news:", error);
+
+      setNews([]);
+
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }
+
+
+  // ==================================================
+  // SEARCH NEWS
+  // ==================================================
+
+  async function handleSearch() {
+    const query = search.trim();
+
+    // If search box is empty,
+    // load the currently selected category
+    if (!query) {
+      loadNews();
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+
+    console.log("Searching for:", query);
+
+    setLoading(true);
+
+    try {
+      const articles = await searchNews(query);
+
+      // Ignore old search response
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.log("Search Articles:", articles);
+
+      const selectedArticles = (articles || []).slice(0, 5);
+
+      // Show searched news immediately
+      setNews(selectedArticles);
+
+      // Generate summaries in ONE batch request
+      if (selectedArticles.length > 0) {
+        console.log("Generating search AI summaries...");
+
+        const summaries = await summarizeNewsBatch(
+          selectedArticles
+        );
+
+        // Ignore old summary response
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        console.log(
+          "Search AI Summaries:",
+          summaries
+        );
+
+        const articlesWithSummaries =
+          selectedArticles.map((article, index) => ({
+            ...article,
+            summary: summaries[index] || "",
+          }));
+
+        setNews(articlesWithSummaries);
+      }
+
+    } catch (error) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.error(
+        "Failed to search news:",
+        error
+      );
+
+      setNews([]);
+
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }
+
+
+  // ==================================================
+  // UI
+  // ==================================================
 
   return (
     <div className="min-h-screen bg-black text-white">
 
-      {/* Hero */}
+      {/* ==============================================
+          HERO
+      ============================================== */}
+
       <section className="flex flex-col items-center text-center px-6 pt-24">
 
         <h1 className="text-6xl md:text-7xl font-extrabold">
@@ -73,7 +202,9 @@ function Home() {
           concise and easy-to-understand insights.
         </p>
 
-        {/* Search */}
+
+        {/* SEARCH */}
+
         <div className="mt-12 w-full max-w-4xl flex">
 
           <input
@@ -100,7 +231,11 @@ function Home() {
 
       </section>
 
-      {/* Categories */}
+
+      {/* ==============================================
+          CATEGORIES
+      ============================================== */}
+
       <section className="mt-20 px-6">
 
         <h2 className="text-3xl font-bold text-center mb-8">
@@ -112,7 +247,6 @@ function Home() {
           <CategoryCard
             title="Technology"
             onClick={() => {
-              console.log("Technology Clicked");
               setSelectedCategory("technology");
             }}
           />
@@ -120,7 +254,6 @@ function Home() {
           <CategoryCard
             title="Artificial Intelligence"
             onClick={() => {
-              console.log("AI Clicked");
               setSelectedCategory("technology");
             }}
           />
@@ -128,7 +261,6 @@ function Home() {
           <CategoryCard
             title="Business"
             onClick={() => {
-              console.log("Business Clicked");
               setSelectedCategory("business");
             }}
           />
@@ -136,7 +268,6 @@ function Home() {
           <CategoryCard
             title="Finance"
             onClick={() => {
-              console.log("Finance Clicked");
               setSelectedCategory("business");
             }}
           />
@@ -144,7 +275,6 @@ function Home() {
           <CategoryCard
             title="Sports"
             onClick={() => {
-              console.log("Sports Clicked");
               setSelectedCategory("sports");
             }}
           />
@@ -152,7 +282,6 @@ function Home() {
           <CategoryCard
             title="Politics"
             onClick={() => {
-              console.log("Politics Clicked");
               setSelectedCategory("general");
             }}
           />
@@ -160,7 +289,6 @@ function Home() {
           <CategoryCard
             title="Science"
             onClick={() => {
-              console.log("Science Clicked");
               setSelectedCategory("science");
             }}
           />
@@ -168,7 +296,6 @@ function Home() {
           <CategoryCard
             title="Health"
             onClick={() => {
-              console.log("Health Clicked");
               setSelectedCategory("health");
             }}
           />
@@ -177,37 +304,75 @@ function Home() {
 
       </section>
 
-      {/* News */}
+
+      {/* ==============================================
+          NEWS
+      ============================================== */}
+
       <section className="mt-24 px-6">
 
         <h2 className="text-4xl font-bold text-center mb-12">
           🔥 Latest Headlines
         </h2>
 
+
+        {/* LOADING */}
+
         {loading ? (
-          <h2 className="text-center text-xl">
-            Loading News...
-          </h2>
+
+          <div className="text-center">
+
+            <h2 className="text-xl">
+              Loading News...
+            </h2>
+
+            <p className="text-gray-500 mt-2">
+              Fetching latest news and generating AI summaries...
+            </p>
+
+          </div>
+
+
+        ) : news.length === 0 ? (
+
+          /* NO NEWS */
+
+          <p className="text-center text-gray-500">
+            No news found.
+          </p>
+
+
         ) : (
+
+          /* NEWS GRID */
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
 
             {news.map((article, index) => (
+
               <NewsCard
-                key={index}
+                key={article.url || index}
                 title={article.title}
                 source={article.source?.name}
                 description={article.description}
                 image={article.urlToImage}
                 url={article.url}
+                summary={article.summary}
               />
+
             ))}
 
           </div>
+
         )}
 
       </section>
 
-      {/* Features */}
+
+      {/* ==============================================
+          FEATURES
+      ============================================== */}
+
       <section className="mt-24 px-6 pb-20">
 
         <h2 className="text-4xl font-bold text-center mb-12">
@@ -224,8 +389,8 @@ function Home() {
 
           <FeatureCard
             icon="globe"
-            title="Multi Language"
-            description="Read news in your preferred language."
+            title="Simple English"
+            description="Understand complex news in simple language."
           />
 
           <FeatureCard
@@ -247,5 +412,6 @@ function Home() {
     </div>
   );
 }
+
 
 export default Home;
