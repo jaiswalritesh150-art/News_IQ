@@ -6,6 +6,30 @@ function NewsCard({
   url,
   summary,
 }) {
+
+  // Convert AI summary into clean bullet points
+  function formatSummary(text) {
+    if (!text) {
+      return [];
+    }
+
+    return text
+      // Split when a new bullet starts
+      .split(/\s*(?:-|•|\*)\s+/)
+      .map((point) => point.trim())
+      .filter(Boolean)
+      // Remove any remaining bullet characters
+      .map((point) =>
+        point
+          .replace(/^[-•*]+/, "")
+          .trim()
+      )
+      .filter(Boolean);
+  }
+
+  const summaryPoints = formatSummary(summary);
+
+
   return (
     <article className="bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 hover:border-zinc-700 transition duration-300">
 
@@ -55,14 +79,39 @@ function NewsCard({
           </div>
 
 
-          {summary ? (
-            <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">
-              {summary}
-            </div>
+          {summaryPoints.length > 0 ? (
+
+            <ul className="space-y-3">
+
+              {summaryPoints.slice(0, 5).map(
+                (point, index) => (
+
+                  <li
+                    key={index}
+                    className="flex items-start gap-3 text-gray-300 text-sm leading-relaxed"
+                  >
+
+                    <span className="text-blue-400 mt-1 shrink-0">
+                      •
+                    </span>
+
+                    <span>
+                      {point}
+                    </span>
+
+                  </li>
+
+                )
+              )}
+
+            </ul>
+
           ) : (
+
             <p className="text-gray-500 text-sm">
               Summary unavailable.
             </p>
+
           )}
 
         </div>
