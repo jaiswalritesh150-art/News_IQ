@@ -3,14 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from google import genai
+from groq import Groq
+
 import os
+import re
 import requests
 import time
 
 
-# --------------------------------------------------
+# ============================================================
 # Environment Configuration
-# --------------------------------------------------
+# ============================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
@@ -18,56 +21,65 @@ ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(ENV_PATH)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+
 
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is not configured.")
 
 if not NEWS_API_KEY:
     raise RuntimeError("NEWS_API_KEY is not configured.")
 
 
-# --------------------------------------------------
-# Gemini Client
-# --------------------------------------------------
+# ============================================================
+# AI Clients
+# ============================================================
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
+
+groq_client = Groq(
+    api_key=GROQ_API_KEY
+)
 
 
-# --------------------------------------------------
+# ============================================================
 # AI Summary Cache
-# --------------------------------------------------
-
-# Stores generated summaries in memory.
-# Cache survives normal requests but resets when
-# the backend process/server restarts.
+# ============================================================
 
 SUMMARY_CACHE = {}
 
-# Keep summaries cached for 6 hours.
 SUMMARY_CACHE_TTL = 60 * 60 * 6
 
 
-def get_cache_key(title: str, description: str) -> str:
-    """
-    Create a unique cache key for an article.
-    """
+def get_cache_key(
+    title: str,
+    description: str,
+    language: str = "English"
+) -> str:
 
-    return f"{title.strip()}::{description.strip()}"
+    return (
+        f"{language.strip()}::"
+        f"{title.strip()}::"
+        f"{description.strip()}"
+    )
 
 
 def get_cached_summary(
     title: str,
-    description: str
+    description: str,
+    language: str = "English"
 ):
-    """
-    Return cached summary if it exists
-    and has not expired.
-    """
 
     key = get_cache_key(
         title,
-        description
+        description,
+        language
     )
 
     cached = SUMMARY_CACHE.get(key)
@@ -77,7 +89,6 @@ def get_cached_summary(
 
     cached_time = cached["timestamp"]
 
-    # Remove expired cache entry
     if time.time() - cached_time > SUMMARY_CACHE_TTL:
 
         del SUMMARY_CACHE[key]
@@ -90,15 +101,14 @@ def get_cached_summary(
 def save_cached_summary(
     title: str,
     description: str,
-    summary: str
+    summary: str,
+    language: str = "English"
 ):
-    """
-    Save generated summary in memory.
-    """
 
     key = get_cache_key(
         title,
-        description
+        description,
+        language
     )
 
     SUMMARY_CACHE[key] = {
@@ -107,9 +117,9 @@ def save_cached_summary(
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # FastAPI App
-# --------------------------------------------------
+# ============================================================
 
 app = FastAPI(
     title="NewsIQ API",
@@ -121,9 +131,9 @@ app = FastAPI(
 )
 
 
-# --------------------------------------------------
+# ============================================================
 # CORS
-# --------------------------------------------------
+# ============================================================
 
 FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
@@ -143,9 +153,9 @@ app.add_middleware(
 )
 
 
-# --------------------------------------------------
+# ============================================================
 # Request Models
-# --------------------------------------------------
+# ============================================================
 
 class NewsRequest(BaseModel):
     title: str
@@ -154,11 +164,12 @@ class NewsRequest(BaseModel):
 
 class BatchNewsRequest(BaseModel):
     articles: list[NewsRequest]
+    language: str = "English"
 
 
-# --------------------------------------------------
+# ============================================================
 # Basic Routes
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/")
 def home():
@@ -177,9 +188,9 @@ def health():
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # NewsAPI - Top Headlines
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/news")
 def get_news(
@@ -246,9 +257,9 @@ def get_news(
         )
 
 
-# --------------------------------------------------
+# ============================================================
 # NewsAPI - Search News
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/search")
 def search_news(q: str):
@@ -257,19 +268,48 @@ def search_news(q: str):
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Search query cannot be empty."
-            )
+            detail="Search query cannot be empty."
         )
 
-    url = (
-        "https://newsapi.org/v2/everything"
+
+    # --------------------------------------------------------
+    # Normalize Search Query
+    # --------------------------------------------------------
+
+    search_query = q.strip()
+
+    search_query = re.sub(
+        r"\bmens\b",
+        "men's",
+        search_query,
+        flags=re.IGNORECASE
     )
 
+    search_query = re.sub(
+        r"\bwomens\b",
+        "women's",
+        search_query,
+        flags=re.IGNORECASE
+    )
+
+    search_query = re.sub(
+        r"\s+",
+        " ",
+        search_query
+    ).strip()
+
+
+    # --------------------------------------------------------
+    # NewsAPI Request
+    # --------------------------------------------------------
+
+    url = "https://newsapi.org/v2/everything"
+
     params = {
-        "q": q,
-        "sortBy": "publishedAt",
+        "q": search_query,
+        "sortBy": "relevancy",
         "language": "en",
+        "pageSize": 20,
         "apiKey": NEWS_API_KEY,
     }
 
@@ -300,17 +340,90 @@ def search_news(q: str):
                 )
             )
 
+        articles = data.get(
+            "articles",
+            []
+        )
+
+
+        # ----------------------------------------------------
+        # Relevance Filtering
+        # ----------------------------------------------------
+
+        query_words = [
+            word.lower().strip(
+                ".,!?;:\"'()[]{}"
+            )
+            for word in search_query.split()
+            if len(
+                word.strip(
+                    ".,!?;:\"'()[]{}"
+                )
+            ) > 2
+        ]
+
+        relevant_articles = []
+
+        for article in articles:
+
+            title = (
+                article.get("title")
+                or ""
+            ).lower()
+
+            description = (
+                article.get("description")
+                or ""
+            ).lower()
+
+            content = (
+                f"{title} {description}"
+            )
+
+            matched_words = 0
+
+            for word in query_words:
+
+                if word in content:
+
+                    matched_words += 1
+                    continue
+
+                normalized_word = word.replace(
+                    "'",
+                    ""
+                )
+
+                normalized_content = content.replace(
+                    "'",
+                    ""
+                )
+
+                if normalized_word in normalized_content:
+
+                    matched_words += 1
+
+
+            required_matches = max(
+                1,
+                (len(query_words) + 1) // 2
+            )
+
+            if matched_words >= required_matches:
+
+                relevant_articles.append(
+                    article
+                )
+
+
         return {
             "success": True,
-            "totalResults": data.get(
-                "totalResults",
-                0
+            "totalResults": len(
+                relevant_articles
             ),
-            "articles": data.get(
-                "articles",
-                []
-            )
+            "articles": relevant_articles
         }
+
 
     except requests.RequestException as e:
 
@@ -328,18 +441,14 @@ def search_news(q: str):
         )
 
 
-# --------------------------------------------------
+# ============================================================
 # AI - Batch News Summarization
-# --------------------------------------------------
+# ============================================================
 
 @app.post("/summarize-batch")
 def summarize_batch(
     news: BatchNewsRequest
 ):
-
-    # --------------------------------------------------
-    # Validate Request
-    # --------------------------------------------------
 
     if not news.articles:
 
@@ -349,39 +458,32 @@ def summarize_batch(
         )
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Limit Batch Size
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     articles = news.articles[:5]
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Summary Tracking
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
     summaries = []
-
     articles_needing_ai = []
 
 
-    # --------------------------------------------------
+    # --------------------------------------------------------
     # Check Cache
-    # --------------------------------------------------
+    # --------------------------------------------------------
 
-    for index, article in enumerate(
-        articles
-    ):
+    for index, article in enumerate(articles):
 
         cached_summary = get_cached_summary(
             article.title,
-            article.description or ""
+            article.description or "",
+            news.language
         )
-
-
-        # ----------------------------------------------
-        # Cached Article
-        # ----------------------------------------------
 
         if cached_summary:
 
@@ -390,11 +492,6 @@ def summarize_batch(
                 "summary": cached_summary,
                 "cached": True
             })
-
-
-        # ----------------------------------------------
-        # New Article
-        # ----------------------------------------------
 
         else:
 
@@ -409,9 +506,9 @@ def summarize_batch(
             )
 
 
-    # --------------------------------------------------
-    # If Everything Is Cached
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Everything Cached
+    # --------------------------------------------------------
 
     if not articles_needing_ai:
 
@@ -429,9 +526,9 @@ def summarize_batch(
         }
 
 
-    # --------------------------------------------------
-    # Prepare Articles for Gemini
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # Prepare Articles
+    # --------------------------------------------------------
 
     articles_text = ""
 
@@ -456,101 +553,328 @@ Description:
 """
 
 
-    # --------------------------------------------------
-    # Gemini Prompt
-    # --------------------------------------------------
+    # --------------------------------------------------------
+    # AI Prompt
+    # --------------------------------------------------------
 
     prompt = f"""
 You are NewsIQ, an AI news assistant.
 
-Summarize each news article below in very simple English.
+Summarize each news article below in very simple language.
+
+The requested output language is: {news.language}
+
+Write the complete summary in the requested language.
 
 {articles_text}
 
 IMPORTANT RULES:
 
 1. Return exactly one summary for every article.
-2. Each summary must contain exactly 3 short bullet points.
-3. Focus only on important facts.
-4. Do not add information that is not present.
-5. Do not mix information between articles.
-6. Keep the language simple and easy to understand.
-7. Do not write an introduction or conclusion.
-8. Use exactly this format:
+2. Each summary must contain exactly 5 short bullet points.
+3. Each bullet should contain useful and different information.
+4. Cover the main event, important facts, people or organizations involved, impact, and what happens next when available.
+5. Do not repeat the same information in different bullets.
+6. Do not add information that is not present in the article.
+7. Do not mix information between articles.
+8. Keep the language simple and easy to understand.
+9. Each bullet should normally be 1-2 short sentences.
+10. Use natural and easy-to-understand language for the selected language.
+11. Do not translate names of people, organizations, places, or official terms unless it is natural to do so.
+12. Do not change the meaning of the original article.
+13. Do not write an introduction or conclusion.
+14. Use exactly this format:
 
 ARTICLE 1
 - Point 1
 - Point 2
 - Point 3
+- Point 4
+- Point 5
 
 ARTICLE 2
 - Point 1
 - Point 2
 - Point 3
+- Point 4
+- Point 5
 
 Continue the same format for every article.
 """
 
 
-    # --------------------------------------------------
-    # Gemini Request
-    # --------------------------------------------------
+    # ========================================================
+    # Generate AI Summary
+    # ========================================================
 
     try:
 
-        print(
-            f"Sending {len(articles_needing_ai)} "
-            "new articles to Gemini..."
-        )
-
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt,
-        )
+        raw_summary = None
 
 
-        # --------------------------------------------------
-        # Validate Gemini Response
-        # --------------------------------------------------
+        # ====================================================
+        # GEMINI PRIMARY
+        # ====================================================
 
-        if not response.text:
+        try:
+
+            print(
+                f"Sending {len(articles_needing_ai)} "
+                "new articles to Gemini..."
+            )
+
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+
+            if response and response.text:
+
+                raw_summary = response.text.strip()
+
+                print(
+                    "Gemini response received."
+                )
+
+            else:
+
+                raise RuntimeError(
+                    "Gemini returned empty content."
+                )
+
+
+        except Exception as gemini_error:
+
+            gemini_error_text = str(
+                gemini_error
+            )
+
+            print(
+                "Gemini failed:",
+                repr(gemini_error)
+            )
+
+
+            # ------------------------------------------------
+            # Gemini Quota Check
+            # ------------------------------------------------
+
+            is_quota_error = (
+                "429" in gemini_error_text
+                or
+                "RESOURCE_EXHAUSTED"
+                in gemini_error_text
+                or
+                "quota"
+                in gemini_error_text.lower()
+            )
+
+
+            if not is_quota_error:
+
+                raise gemini_error
+
+
+            # =================================================
+            # GROQ FALLBACK
+            # =================================================
+
+            print(
+                "Gemini quota exceeded."
+            )
+
+            print(
+                "Falling back to Groq..."
+            )
+
+
+            try:
+
+                groq_response = (
+                    groq_client.chat.completions.create(
+                        model="openai/gpt-oss-20b",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=0.2,
+                    )
+                )
+
+
+                # ------------------------------------------------
+                # Debug Groq Response
+                # ------------------------------------------------
+
+                print(
+                    "Groq response type:",
+                    type(groq_response)
+                )
+
+                print(
+                    "Groq choices count:",
+                    len(groq_response.choices)
+                    if groq_response
+                    and groq_response.choices
+                    else 0
+                )
+
+
+                if (
+                    not groq_response
+                    or not groq_response.choices
+                ):
+
+                    raise RuntimeError(
+                        "Groq returned no choices."
+                    )
+
+
+                choice = (
+                    groq_response
+                    .choices[0]
+                )
+
+
+                if not choice:
+
+                    raise RuntimeError(
+                        "Groq returned an empty choice."
+                    )
+
+
+                message = choice.message
+
+
+                if not message:
+
+                    raise RuntimeError(
+                        "Groq returned no message."
+                    )
+
+
+                # ------------------------------------------------
+                # Read Groq Content
+                # ------------------------------------------------
+
+                content = getattr(
+                    message,
+                    "content",
+                    None
+                )
+
+                reasoning = getattr(
+                    message,
+                    "reasoning",
+                    None
+                )
+
+
+                print(
+                    "Groq content exists:",
+                    bool(content)
+                )
+
+                print(
+                    "Groq reasoning exists:",
+                    bool(reasoning)
+                )
+
+
+                # ------------------------------------------------
+                # Some Groq responses may expose useful
+                # generated text through reasoning/content.
+                # Prefer content, then reasoning as fallback.
+                # ------------------------------------------------
+
+                if content:
+
+                    raw_summary = content.strip()
+
+                elif reasoning:
+
+                    raw_summary = reasoning.strip()
+
+                else:
+
+                    # Print complete response only when
+                    # both fields are empty.
+                    print(
+                        "Groq returned no content/reasoning."
+                    )
+
+                    print(
+                        "Groq FULL RESPONSE:",
+                        groq_response
+                    )
+
+                    raise RuntimeError(
+                        "Groq returned empty content."
+                    )
+
+
+                if not raw_summary:
+
+                    raise RuntimeError(
+                        "Groq returned blank text."
+                    )
+
+
+                print(
+                    "Groq response received."
+                )
+
+
+            except Exception as groq_error:
+
+                print(
+                    "Groq fallback failed:",
+                    repr(groq_error)
+                )
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Both Gemini and Groq "
+                        "summary services are "
+                        "temporarily unavailable."
+                    )
+                )
+
+
+        # ====================================================
+        # Validate AI Response
+        # ====================================================
+
+        if not raw_summary:
 
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    "Gemini returned "
+                    "AI returned "
                     "an empty response."
                 )
             )
 
 
-        raw_summary = response.text.strip()
-
-        print(
-            "Gemini response received."
-        )
-
-
-        # --------------------------------------------------
-        # Parse Gemini Response
-        # --------------------------------------------------
+        # ====================================================
+        # Parse AI Response
+        # ====================================================
 
         generated_summaries = []
-
 
         for position in range(
             1,
             len(articles_needing_ai) + 1
         ):
 
-            marker = (
-                f"ARTICLE {position}"
-            )
+            marker = f"ARTICLE {position}"
 
             start = raw_summary.find(
                 marker
             )
-
 
             if start == -1:
 
@@ -563,30 +887,44 @@ Continue the same format for every article.
 
             start += len(marker)
 
-
             next_marker = (
                 f"ARTICLE {position + 1}"
             )
-
 
             end = raw_summary.find(
                 next_marker,
                 start
             )
 
-
             if end == -1:
 
-                section = (
-                    raw_summary[start:]
-                )
+                section = raw_summary[start:]
 
             else:
 
-                section = (
-                    raw_summary[start:end]
-                )
+                section = raw_summary[
+                    start:end
+                ]
 
+
+            section = section.strip()
+
+
+            # ------------------------------------------------
+            # Clean accidental markdown fences
+            # ------------------------------------------------
+
+            section = re.sub(
+                r"```(?:text|markdown)?",
+                "",
+                section,
+                flags=re.IGNORECASE
+            )
+
+            section = section.replace(
+                "```",
+                ""
+            )
 
             section = section.strip()
 
@@ -603,9 +941,9 @@ Continue the same format for every article.
             )
 
 
-        # --------------------------------------------------
+        # ====================================================
         # Save Generated Summaries
-        # --------------------------------------------------
+        # ====================================================
 
         for generated_index, (
             original_index,
@@ -632,18 +970,14 @@ Continue the same format for every article.
                 )
 
 
-            # ----------------------------------------------
-            # Update Result
-            # ----------------------------------------------
-
             summaries[
                 original_index
             ]["summary"] = generated_summary
 
 
-            # ----------------------------------------------
-            # Save to Cache
-            # ----------------------------------------------
+            # ------------------------------------------------
+            # Cache Summary
+            # ------------------------------------------------
 
             if (
                 generated_summary
@@ -653,13 +987,14 @@ Continue the same format for every article.
                 save_cached_summary(
                     article.title,
                     article.description or "",
-                    generated_summary
+                    generated_summary,
+                    news.language
                 )
 
 
-        # --------------------------------------------------
+        # ====================================================
         # Final Response
-        # --------------------------------------------------
+        # ====================================================
 
         return {
             "success": True,
@@ -672,56 +1007,17 @@ Continue the same format for every article.
         }
 
 
-    # --------------------------------------------------
-    # HTTP Exceptions
-    # --------------------------------------------------
-
     except HTTPException:
 
         raise
 
 
-    # --------------------------------------------------
-    # Gemini Errors
-    # --------------------------------------------------
-
     except Exception as e:
 
-        error_text = str(e)
-
         print(
-            "Gemini batch API error:",
+            "AI batch API error:",
             repr(e)
         )
-
-
-        # --------------------------------------------------
-        # Rate Limit / Quota Error
-        # --------------------------------------------------
-
-        if (
-            "429" in error_text
-            or
-            "RESOURCE_EXHAUSTED"
-            in error_text
-            or
-            "quota"
-            in error_text.lower()
-        ):
-
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    "AI summary quota is "
-                    "temporarily unavailable. "
-                    "Please try again later."
-                )
-            )
-
-
-        # --------------------------------------------------
-        # Other Gemini Errors
-        # --------------------------------------------------
 
         raise HTTPException(
             status_code=502,
