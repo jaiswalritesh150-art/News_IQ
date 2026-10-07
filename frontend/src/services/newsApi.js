@@ -2,7 +2,6 @@
   import.meta.env.VITE_AI_API_URL ||
   "http://127.0.0.1:8000";
 
-
 // --------------------------------------------------
 // Fetch Top Headlines
 // --------------------------------------------------
@@ -50,8 +49,6 @@ export async function fetchTopHeadlines(
     return [];
   }
 }
-
-
 // --------------------------------------------------
 // Search News
 // --------------------------------------------------
@@ -119,6 +116,7 @@ function createBatchKey(articles) {
       return [
         article.title || "",
         article.description || "",
+        article.url || "",
       ].join("::");
     })
     .join("||");
@@ -208,6 +206,29 @@ export async function summarizeNewsBatch(
                   description:
                     article.description ||
                     "No description available.",
+
+                  // Database metadata
+                  url:
+                    article.url || null,
+
+                  source:
+                    article.source?.name ||
+                    article.source ||
+                    null,
+
+                  image_url:
+                    article.urlToImage ||
+                    article.image_url ||
+                    null,
+
+                  category:
+                    article.category ||
+                    null,
+
+                  published_at:
+                    article.publishedAt ||
+                    article.published_at ||
+                    null,
                 })
               ),
           }),
@@ -301,3 +322,4 @@ export async function summarizeNewsBatch(
 
   return activeBatchRequest;
 }
+
