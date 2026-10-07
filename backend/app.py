@@ -5,10 +5,17 @@ from dotenv import load_dotenv
 from google import genai
 from groq import Groq
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from database import Base, engine, SessionLocal
+from models import Article, Summary
+
 import os
 import re
 import requests
 import time
+from datetime import datetime
 
 
 # ============================================================
@@ -40,12 +47,22 @@ if not NEWS_API_KEY:
 # ============================================================
 
 client = genai.Client(
-    api_key=GEMINI_API_KEY
+    api_key=GEMINI_API_KEY,
+    http_options=genai.types.HttpOptions(
+        timeout=10000
+    )
 )
 
 groq_client = Groq(
     api_key=GROQ_API_KEY
 )
+
+
+# ============================================================
+# Database Initialization
+# ============================================================
+
+Base.metadata.create_all(bind=engine)
 
 
 # ============================================================
@@ -118,6 +135,259 @@ def save_cached_summary(
 
 
 # ============================================================
+# Database Helpers
+# ============================================================
+
+def parse_published_at(value):
+    """
+    Convert NewsAPI publishedAt string into datetime.
+    Returns None if parsing fails.
+    """
+
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    try:
+        return datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        ).replace(tzinfo=None)
+
+    except (ValueError, TypeError):
+        return None
+
+
+def save_article_to_db(
+    article_data: dict,
+    db: Session
+):
+    """
+    Create or update an article using URL as the unique key.
+    """
+
+    url = article_data.get("url")
+
+    if not url:
+        return None
+
+    existing_article = db.scalar(
+        select(Article).where(
+            Article.url == url
+        )
+    )
+
+    published_at = parse_published_at(
+        article_data.get("publishedAt")
+    )
+
+    if existing_article:
+
+        existing_article.title = (
+            article_data.get("title")
+            or existing_article.title
+        )
+
+        existing_article.description = (
+            article_data.get("description")
+        )
+
+        existing_article.source = (
+            article_data.get("source", {}).get("name")
+            if isinstance(
+                article_data.get("source"),
+                dict
+            )
+            else article_data.get("source")
+        )
+
+        existing_article.image_url = (
+            article_data.get("urlToImage")
+            or existing_article.image_url
+        )
+
+        existing_article.category = (
+            article_data.get("category")
+            or existing_article.category
+        )
+
+        if published_at:
+            existing_article.published_at = published_at
+
+        db.commit()
+        db.refresh(existing_article)
+
+        return existing_article
+
+    source_name = (
+        article_data.get("source", {}).get("name")
+        if isinstance(
+            article_data.get("source"),
+            dict
+        )
+        else article_data.get("source")
+    )
+
+    new_article = Article(
+        title=article_data.get("title")
+        or "Untitled Article",
+
+        description=article_data.get(
+            "description"
+        ),
+
+        source=source_name,
+
+        url=url,
+
+        image_url=article_data.get(
+            "urlToImage"
+        ),
+
+        category=article_data.get(
+            "category"
+        ),
+
+        published_at=published_at,
+    )
+
+    db.add(new_article)
+
+    db.commit()
+    db.refresh(new_article)
+
+    return new_article
+
+
+def save_articles_to_db(
+    articles: list,
+    category: str | None = None
+):
+    """
+    Save a list of NewsAPI articles.
+    """
+
+    if not articles:
+        return
+
+    db = SessionLocal()
+
+    try:
+
+        saved_count = 0
+
+        for article in articles:
+
+            article_copy = dict(article)
+
+            if category:
+                article_copy["category"] = category
+
+            saved_article = save_article_to_db(
+                article_copy,
+                db
+            )
+
+            if saved_article:
+                saved_count += 1
+
+        print(
+            f"Database: saved/updated "
+            f"{saved_count} articles."
+        )
+
+    except Exception as e:
+
+        db.rollback()
+
+        print(
+            "Database article save error:",
+            repr(e)
+        )
+
+    finally:
+
+        db.close()
+
+
+def save_summary_to_db(
+    article,
+    summary_text: str,
+    language: str
+):
+    """
+    Save a generated summary for an existing article.
+
+    Prevents duplicate summary rows for the
+    same article + language.
+    """
+
+    if not article:
+        return
+
+    if not summary_text:
+        return
+
+    if summary_text == "Summary unavailable.":
+        return
+
+    db = SessionLocal()
+
+    try:
+
+        db_article = db.scalar(
+            select(Article).where(
+                Article.url == article.url
+            )
+        )
+
+        if not db_article:
+            return
+
+        existing_summary = db.scalar(
+            select(Summary).where(
+                Summary.article_id == db_article.id,
+                Summary.language == language
+            )
+        )
+
+        if existing_summary:
+
+            existing_summary.summary = summary_text
+
+        else:
+
+            new_summary = Summary(
+                article_id=db_article.id,
+                summary=summary_text,
+                language=language,
+            )
+
+            db.add(new_summary)
+
+        db.commit()
+
+        print(
+            "Database: summary saved for:",
+            db_article.title
+        )
+
+    except Exception as e:
+
+        db.rollback()
+
+        print(
+            "Database summary save error:",
+            repr(e)
+        )
+
+    finally:
+
+        db.close()
+
+
+# ============================================================
 # FastAPI App
 # ============================================================
 
@@ -160,6 +430,14 @@ app.add_middleware(
 class NewsRequest(BaseModel):
     title: str
     description: str
+
+    # Optional article metadata.
+    # Frontend will send these after the next update.
+    url: str | None = None
+    source: str | None = None
+    image_url: str | None = None
+    category: str | None = None
+    published_at: str | None = None
 
 
 class BatchNewsRequest(BaseModel):
@@ -229,16 +507,27 @@ def get_news(
                 detail="NewsAPI returned an error."
             )
 
+        articles = data.get(
+            "articles",
+            []
+        )
+
+        # ----------------------------------------------------
+        # Save NewsAPI articles to PostgreSQL
+        # ----------------------------------------------------
+
+        save_articles_to_db(
+            articles,
+            category=category
+        )
+
         return {
             "success": True,
             "totalResults": data.get(
                 "totalResults",
                 0
             ),
-            "articles": data.get(
-                "articles",
-                []
-            )
+            "articles": articles
         }
 
     except requests.RequestException as e:
@@ -414,6 +703,15 @@ def search_news(q: str):
                 relevant_articles.append(
                     article
                 )
+
+
+        # ----------------------------------------------------
+        # Save Search Results to PostgreSQL
+        # ----------------------------------------------------
+
+        save_articles_to_db(
+            relevant_articles
+        )
 
 
         return {
@@ -656,10 +954,10 @@ Continue the same format for every article.
 
 
             # ------------------------------------------------
-            # Gemini Quota Check
+            # Gemini Quota / Availability Check
             # ------------------------------------------------
 
-            is_quota_error = (
+            is_fallback_error = (
                 "429" in gemini_error_text
                 or
                 "RESOURCE_EXHAUSTED"
@@ -667,10 +965,26 @@ Continue the same format for every article.
                 or
                 "quota"
                 in gemini_error_text.lower()
+                or
+                "504" in gemini_error_text
+                or
+                "DEADLINE_EXCEEDED"
+                in gemini_error_text
+                or
+                "503" in gemini_error_text
+                or
+                "UNAVAILABLE"
+                in gemini_error_text
+                or
+                "timeout"
+                in gemini_error_text.lower()
+                or
+                "timed out"
+                in gemini_error_text.lower()
             )
 
 
-            if not is_quota_error:
+            if not is_fallback_error:
 
                 raise gemini_error
 
@@ -703,10 +1017,6 @@ Continue the same format for every article.
                     )
                 )
 
-
-                # ------------------------------------------------
-                # Debug Groq Response
-                # ------------------------------------------------
 
                 print(
                     "Groq response type:",
@@ -755,10 +1065,6 @@ Continue the same format for every article.
                     )
 
 
-                # ------------------------------------------------
-                # Read Groq Content
-                # ------------------------------------------------
-
                 content = getattr(
                     message,
                     "content",
@@ -783,12 +1089,6 @@ Continue the same format for every article.
                 )
 
 
-                # ------------------------------------------------
-                # Some Groq responses may expose useful
-                # generated text through reasoning/content.
-                # Prefer content, then reasoning as fallback.
-                # ------------------------------------------------
-
                 if content:
 
                     raw_summary = content.strip()
@@ -799,8 +1099,6 @@ Continue the same format for every article.
 
                 else:
 
-                    # Print complete response only when
-                    # both fields are empty.
                     print(
                         "Groq returned no content/reasoning."
                     )
@@ -865,80 +1163,161 @@ Continue the same format for every article.
 
         generated_summaries = []
 
-        for position in range(
-            1,
-            len(articles_needing_ai) + 1
-        ):
+        cleaned_raw = re.sub(
+            r"```(?:text|markdown)?",
+            "",
+            raw_summary,
+            flags=re.IGNORECASE
+        ).replace("```", "").strip()
 
-            marker = f"ARTICLE {position}"
 
-            start = raw_summary.find(
-                marker
-            )
+        # ----------------------------------------------------
+        # Primary parser
+        # ----------------------------------------------------
 
-            if start == -1:
+        article_pattern = re.compile(
+            r"ARTICLE\s+(\d+)\s*(.*?)(?=ARTICLE\s+\d+|$)",
+            re.IGNORECASE | re.DOTALL
+        )
+
+        matches = article_pattern.findall(
+            cleaned_raw
+        )
+
+        if matches:
+
+            parsed_by_number = {}
+
+            for number, section in matches:
+
+                section = section.strip()
+
+                section = re.sub(
+                    r"^\s*(?:summary\s*:?)\s*",
+                    "",
+                    section,
+                    flags=re.IGNORECASE
+                ).strip()
+
+                if section:
+
+                    parsed_by_number[
+                        int(number)
+                    ] = section
+
+
+            for position in range(
+                1,
+                len(articles_needing_ai) + 1
+            ):
 
                 generated_summaries.append(
-                    "Summary unavailable."
+                    parsed_by_number.get(
+                        position,
+                        "Summary unavailable."
+                    )
                 )
 
-                continue
+        else:
+
+            # ------------------------------------------------
+            # Fallback parser
+            # ------------------------------------------------
+
+            lines = [
+                line.strip()
+                for line in cleaned_raw.splitlines()
+                if line.strip()
+            ]
 
 
-            start += len(marker)
+            lines = [
+                line
+                for line in lines
+                if not re.match(
+                    r"^(?:summary|article\s*\d*)\s*:?$",
+                    line,
+                    re.IGNORECASE
+                )
+            ]
 
-            next_marker = (
-                f"ARTICLE {position + 1}"
+
+            expected_count = len(
+                articles_needing_ai
             )
 
-            end = raw_summary.find(
-                next_marker,
-                start
-            )
+            bullet_lines = []
 
-            if end == -1:
+            for line in lines:
 
-                section = raw_summary[start:]
+                cleaned_line = re.sub(
+                    r"^(?:[-?*]|\d+[.)])\s+",
+                    "",
+                    line
+                ).strip()
+
+                if cleaned_line:
+
+                    bullet_lines.append(
+                        cleaned_line
+                    )
+
+
+            if len(bullet_lines) >= expected_count * 5:
+
+                for position in range(
+                    expected_count
+                ):
+
+                    points = bullet_lines[
+                        position * 5:
+                        (position + 1) * 5
+                    ]
+
+                    generated_summaries.append(
+                        "\n".join(
+                            f"- {point}"
+                            for point in points
+                        )
+                    )
 
             else:
 
-                section = raw_summary[
-                    start:end
-                ]
+                for position in range(
+                    expected_count
+                ):
+
+                    if position < len(lines):
+
+                        generated_summaries.append(
+                            lines[position]
+                        )
+
+                    else:
+
+                        generated_summaries.append(
+                            "Summary unavailable."
+                        )
 
 
-            section = section.strip()
+        # ----------------------------------------------------
+        # Guarantee one result per AI article
+        # ----------------------------------------------------
 
-
-            # ------------------------------------------------
-            # Clean accidental markdown fences
-            # ------------------------------------------------
-
-            section = re.sub(
-                r"```(?:text|markdown)?",
-                "",
-                section,
-                flags=re.IGNORECASE
-            )
-
-            section = section.replace(
-                "```",
-                ""
-            )
-
-            section = section.strip()
-
-
-            if not section:
-
-                section = (
-                    "Summary unavailable."
-                )
-
+        while len(
+            generated_summaries
+        ) < len(articles_needing_ai):
 
             generated_summaries.append(
-                section
+                "Summary unavailable."
             )
+
+
+        generated_summaries = (
+            generated_summaries[
+                :len(articles_needing_ai)
+            ]
+        )
 
 
         # ====================================================
@@ -990,6 +1369,58 @@ Continue the same format for every article.
                     generated_summary,
                     news.language
                 )
+
+
+            # ------------------------------------------------
+            # Save Summary to PostgreSQL
+            # ------------------------------------------------
+
+            if (
+                generated_summary
+                != "Summary unavailable."
+                and article.url
+            ):
+
+                try:
+
+                    db = SessionLocal()
+
+                    try:
+
+                        article_data = {
+                            "title": article.title,
+                            "description": article.description,
+                            "url": article.url,
+                            "source": article.source,
+                            "urlToImage": article.image_url,
+                            "category": article.category,
+                            "publishedAt": article.published_at,
+                        }
+
+                        db_article = save_article_to_db(
+                            article_data,
+                            db
+                        )
+
+                    finally:
+
+                        db.close()
+
+
+                    if db_article:
+
+                        save_summary_to_db(
+                            db_article,
+                            generated_summary,
+                            news.language
+                        )
+
+                except Exception as db_error:
+
+                    print(
+                        "Database summary integration error:",
+                        repr(db_error)
+                    )
 
 
         # ====================================================
